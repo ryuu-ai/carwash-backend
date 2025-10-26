@@ -68,8 +68,8 @@ app.post('/api/create-admin', async (req, res) => {
     const bcrypt = require('bcryptjs');
     
     // Check if admin already exists
-    const adminCheck = await pool.query('SELECT COUNT(*) FROM users WHERE role = $1', ['admin']);
-    if (parseInt(adminCheck.rows[0].count) > 0) {
+    const [adminCheck] = await pool.query('SELECT COUNT(*) as count FROM users WHERE role = ?', ['admin']);
+    if (parseInt(adminCheck[0].count) > 0) {
       return res.json({ message: 'Admin user already exists' });
     }
     
@@ -77,7 +77,7 @@ app.post('/api/create-admin', async (req, res) => {
     const hashedPassword = await bcrypt.hash('admin123', 10);
     await pool.query(`
       INSERT INTO users (username, email, password_hash, full_name, phone, role) VALUES
-      ('admin', 'admin@gmail.com', $1, 'System Administrator', '09123456789', 'admin')
+      ('admin', 'admin@gmail.com', ?, 'System Administrator', '09123456789', 'admin')
     `, [hashedPassword]);
     
     res.json({ 

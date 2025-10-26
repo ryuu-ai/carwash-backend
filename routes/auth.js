@@ -16,12 +16,12 @@ router.post('/register', async (req, res) => {
     }
 
     // Check if user already exists
-    const existingUser = await pool.query(
-      'SELECT * FROM users WHERE username = $1 OR email = $2',
+    const [existingUser] = await pool.query(
+      'SELECT * FROM users WHERE username = ? OR email = ?',
       [username, email]
     );
 
-    if (existingUser.rows.length > 0) {
+    if (existingUser.length > 0) {
       return res.status(400).json({ error: 'Username or email already exists' });
     }
 
@@ -30,12 +30,17 @@ router.post('/register', async (req, res) => {
     const password_hash = await bcrypt.hash(password, saltRounds);
 
     // Insert new user
-    const result = await pool.query(
-      'INSERT INTO users (username, email, password_hash, full_name, phone) VALUES ($1, $2, $3, $4, $5) RETURNING id, username, email, full_name, phone',
+    const [result] = await pool.query(
+      'INSERT INTO users (username, email, password_hash, full_name, phone) VALUES (?, ?, ?, ?, ?)',
       [username, email, password_hash, full_name, phone]
     );
 
-    const user = result.rows[0];
+    // Get the inserted user
+    const [userRows] = await pool.query(
+      'SELECT id, username, email, full_name, phone FROM users WHERE id = ?',
+      [result.insertId]
+    );
+    const user = userRows[0];
 
     // Generate JWT token
     const token = jwt.sign(
@@ -73,16 +78,16 @@ router.post('/login', async (req, res) => {
     }
 
     // Find user by username or email
-    const result = await pool.query(
-      'SELECT * FROM users WHERE username = $1 OR email = $1',
-      [username]
+    const [result] = await pool.query(
+      'SELECT * FROM users WHERE username = ? OR email = ?',
+      [username, username]
     );
 
-    if (result.rows.length === 0) {
+    if (result.length === 0) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const user = result.rows[0];
+    const user = result[0];
 
     // Check password
     const isValidPassword = await bcrypt.compare(password, user.password_hash);
@@ -136,26 +141,32 @@ router.put('/update-profile', async (req, res) => {
     }
 
     // Check if email is already used by another user
-    const existingUser = await pool.query(
-      'SELECT * FROM users WHERE email = $1 AND id != $2',
+    const [existingUser] = await pool.query(
+      'SELECT * FROM users WHERE email = ? AND id != ?',
       [email, userId]
     );
 
-    if (existingUser.rows.length > 0) {
+    if (existingUser.length > 0) {
       return res.status(400).json({ error: 'Email already in use by another account' });
     }
 
     // Update user profile
-    const result = await pool.query(
-      'UPDATE users SET full_name = $1, phone = $2, email = $3, updated_at = NOW() WHERE id = $4 RETURNING id, username, email, full_name, phone',
+    await pool.query(
+      'UPDATE users SET full_name = ?, phone = ?, email = ? WHERE id = ?',
       [full_name, phone, email, userId]
     );
 
-    if (result.rows.length === 0) {
+    // Get updated user
+    const [updatedUserRows] = await pool.query(
+      'SELECT id, username, email, full_name, phone FROM users WHERE id = ?',
+      [userId]
+    );
+
+    if (updatedUserRows.length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    const updatedUser = result.rows[0];
+    const updatedUser = updatedUserRows[0];
 
     res.json({
       message: 'Profile updated successfully',
