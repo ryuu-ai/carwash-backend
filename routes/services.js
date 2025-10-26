@@ -140,10 +140,14 @@ router.delete('/', authenticateAdmin, async (req, res) => {
       return res.status(404).json({ error: 'Service not found' });
     }
 
-    // Delete associated bookings first (cascade delete)
-    await pool.query('DELETE FROM bookings WHERE service_id = $1', [id]);
-    
-    // Then delete the service
+    // Check if service is used in any bookings
+    const bookingCheck = await pool.query('SELECT COUNT(*) FROM bookings WHERE service_id = $1', [id]);
+    if (parseInt(bookingCheck.rows[0].count) > 0) {
+      return res.status(400).json({ 
+        error: 'Cannot delete service that has existing bookings' 
+      });
+    }
+
     await pool.query('DELETE FROM services WHERE id = $1', [id]);
 
     res.json({
