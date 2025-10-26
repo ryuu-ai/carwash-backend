@@ -1,23 +1,19 @@
-const mysql = require('mysql2/promise');
+const { Pool } = require('pg');
 
-const pool = mysql.createPool({
-  uri: process.env.DATABASE_URL,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-  enableKeepAlive: true,
-  keepAliveInitialDelay: 0
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
 // Database initialization script
 const initDatabase = async () => {
   try {
-    const connection = await pool.getConnection();
+    const client = await pool.connect();
     
     // Create users table
-    await connection.query(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS users (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         username VARCHAR(50) UNIQUE NOT NULL,
         email VARCHAR(100) UNIQUE NOT NULL,
         password_hash VARCHAR(255) NOT NULL,
@@ -25,19 +21,19 @@ const initDatabase = async () => {
         phone VARCHAR(20) NOT NULL,
         role VARCHAR(20) DEFAULT 'customer',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
     // Create default admin user if it doesn't exist
     const bcrypt = require('bcryptjs');
     try {
-      const [adminCheck] = await connection.query('SELECT COUNT(*) as count FROM users WHERE role = ?', ['admin']);
-      if (parseInt(adminCheck[0].count) === 0) {
+      const adminCheck = await client.query('SELECT COUNT(*) FROM users WHERE role = $1', ['admin']);
+      if (parseInt(adminCheck.rows[0].count) === 0) {
         const hashedPassword = await bcrypt.hash('admin123', 10);
-        await connection.query(`
+        await client.query(`
           INSERT INTO users (username, email, password_hash, full_name, phone, role) VALUES
-          ('admin', 'admin@gmail.com', ?, 'System Administrator', '09123456789', 'admin')
+          ('admin', 'admin@gmail.com', $1, 'System Administrator', '09123456789', 'admin')
         `, [hashedPassword]);
         console.log('Default admin user created');
         console.log('Admin login: admin@gmail.com / admin123');
@@ -47,9 +43,9 @@ const initDatabase = async () => {
     }
 
     // Create services table
-    await connection.query(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS services (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         name VARCHAR(100) NOT NULL,
         price DECIMAL(10,2) NOT NULL,
         description TEXT
@@ -57,11 +53,11 @@ const initDatabase = async () => {
     `);
 
     // Create bookings table
-    await connection.query(`
+    await client.query(`
       CREATE TABLE IF NOT EXISTS bookings (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT,
-        service_id INT,
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id),
+        service_id INTEGER REFERENCES services(id),
         booking_date DATE NOT NULL,
         booking_time TIME NOT NULL,
         customer_name VARCHAR(100),
@@ -76,17 +72,15 @@ const initDatabase = async () => {
         payment_status VARCHAR(20) DEFAULT 'pending',
         paypal_order_id VARCHAR(100),
         paypal_capture_id VARCHAR(100),
-        payment_completed_at TIMESTAMP NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id),
-        FOREIGN KEY (service_id) REFERENCES services(id)
+        payment_completed_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
     // Insert default services if they don't exist
-    const [servicesCheck] = await connection.query('SELECT COUNT(*) as count FROM services');
-    if (parseInt(servicesCheck[0].count) === 0) {
-      await connection.query(`
+    const servicesCheck = await client.query('SELECT COUNT(*) FROM services');
+    if (parseInt(servicesCheck.rows[0].count) === 0) {
+      await client.query(`
         INSERT INTO services (name, price, description) VALUES
         ('Basic Wash', 200, 'Simple exterior rinse and soap cleaning'),
         ('Express Wash', 300, 'Quick exterior wash and rinse (15 minutes)'),
@@ -100,7 +94,7 @@ const initDatabase = async () => {
       console.log('Default services inserted');
     }
 
-    connection.release();
+    client.release();
     console.log('Database initialized successfully');
   } catch (err) {
     console.error('Error initializing database:', err);
