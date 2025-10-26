@@ -28,11 +28,11 @@ const authenticateAdmin = (req, res, next) => {
 // Get all services (public - no auth required)
 router.get('/', async (req, res) => {
   try {
-    const [result] = await pool.query('SELECT * FROM services ORDER BY id');
+    const result = await pool.query('SELECT * FROM services ORDER BY id');
     res.json({
       success: true,
-      services: result,
-      count: result.length
+      services: result.rows,
+      count: result.rows.length
     });
   } catch (error) {
     console.error('Error fetching services:', error);
@@ -44,16 +44,13 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const [result] = await pool.query('SELECT * FROM services WHERE id = ?', [id]);
+    const result = await pool.query('SELECT * FROM services WHERE id = $1', [id]);
     
-    if (result.length === 0) {
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Service not found' });
     }
-
-    res.json({
-      success: true,
-      service: result[0],
-    });
+    
+    res.json(result.rows[0]);
   } catch (error) {
     console.error('Error fetching service:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -75,18 +72,15 @@ router.post('/', authenticateAdmin, async (req, res) => {
       return res.status(400).json({ error: 'Price must be a positive number' });
     }
 
-    const [result] = await pool.query(
-      'INSERT INTO services (name, price, description) VALUES (?, ?, ?)',
+    const result = await pool.query(
+      'INSERT INTO services (name, price, description) VALUES ($1, $2, $3) RETURNING *',
       [name, parseFloat(price), description]
     );
-
-    // Get the inserted service
-    const [serviceRows] = await pool.query('SELECT * FROM services WHERE id = ?', [result.insertId]);
 
     res.status(201).json({
       success: true,
       message: 'Service created successfully',
-      service: serviceRows[0],
+      service: result.rows[0]
     });
   } catch (error) {
     console.error('Error creating service:', error);
@@ -110,23 +104,20 @@ router.put('/', authenticateAdmin, async (req, res) => {
     }
 
     // Check if service exists
-    const [serviceCheck] = await pool.query('SELECT * FROM services WHERE id = ?', [id]);
-    if (serviceCheck.length === 0) {
+    const serviceCheck = await pool.query('SELECT * FROM services WHERE id = $1', [id]);
+    if (serviceCheck.rows.length === 0) {
       return res.status(404).json({ error: 'Service not found' });
     }
 
-    await pool.query(
-      'UPDATE services SET name = ?, price = ?, description = ? WHERE id = ?',
+    const result = await pool.query(
+      'UPDATE services SET name = $1, price = $2, description = $3 WHERE id = $4 RETURNING *',
       [name, parseFloat(price), description, id]
     );
-
-    // Get updated service
-    const [result] = await pool.query('SELECT * FROM services WHERE id = ?', [id]);
 
     res.json({
       success: true,
       message: 'Service updated successfully',
-      service: result[0],
+      service: result.rows[0]
     });
   } catch (error) {
     console.error('Error updating service:', error);
@@ -144,20 +135,20 @@ router.delete('/', authenticateAdmin, async (req, res) => {
     }
 
     // Check if service exists
-    const [serviceCheck] = await pool.query('SELECT * FROM services WHERE id = ?', [id]);
-    if (serviceCheck.length === 0) {
+    const serviceCheck = await pool.query('SELECT * FROM services WHERE id = $1', [id]);
+    if (serviceCheck.rows.length === 0) {
       return res.status(404).json({ error: 'Service not found' });
     }
 
     // Check if service is used in any bookings
-    const [bookingCheck] = await pool.query('SELECT COUNT(*) as count FROM bookings WHERE service_id = ?', [id]);
-    if (parseInt(bookingCheck[0].count) > 0) {
+    const bookingCheck = await pool.query('SELECT COUNT(*) FROM bookings WHERE service_id = $1', [id]);
+    if (parseInt(bookingCheck.rows[0].count) > 0) {
       return res.status(400).json({ 
         error: 'Cannot delete service that has existing bookings' 
       });
     }
 
-    await pool.query('DELETE FROM services WHERE id = ?', [id]);
+    await pool.query('DELETE FROM services WHERE id = $1', [id]);
 
     res.json({
       success: true,
